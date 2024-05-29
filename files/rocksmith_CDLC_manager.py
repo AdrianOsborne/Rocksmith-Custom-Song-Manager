@@ -3,12 +3,101 @@ import shutil
 import sys
 import random
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem,
-                             QFileDialog, QCheckBox, QHeaderView, QMessageBox, QLabel, QLineEdit, QInputDialog)
+                             QFileDialog, QCheckBox, QHeaderView, QMessageBox, QLabel, QLineEdit, QInputDialog, QTreeWidget, QTreeWidgetItem)
 from PyQt5.QtCore import Qt, QMetaObject
 
-class RocksmithDLCManager(QWidget):
+class InitialWindow(QWidget):
     def __init__(self):
         super().__init__()
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle('Select Root Directory')
+        self.setGeometry(100, 100, 800, 600)
+        
+        layout = QVBoxLayout()
+
+        self.searchField = QLineEdit()
+        self.searchField.setPlaceholderText('Search for a directory...')
+        self.searchField.textChanged.connect(self.search_directories)
+        layout.addWidget(self.searchField)
+
+        self.treeWidget = QTreeWidget()
+        self.treeWidget.setHeaderLabels(["Directories"])
+        layout.addWidget(self.treeWidget)
+
+        button_layout = QHBoxLayout()
+
+        self.chooseDirButton = QPushButton('Choose Directory')
+        self.chooseDirButton.clicked.connect(self.choose_directory)
+        button_layout.addWidget(self.chooseDirButton)
+
+        self.openDirButton = QPushButton('Open Directory')
+        self.openDirButton.clicked.connect(self.open_directory)
+        button_layout.addWidget(self.openDirButton)
+
+        layout.addLayout(button_layout)
+
+        self.setLayout(layout)
+
+        self.load_saved_directory()
+
+    def choose_directory(self):
+        root_dir = QFileDialog.getExistingDirectory(self, "Select Root Directory")
+        if root_dir:
+            self.save_selected_directory(root_dir)
+            self.load_directories(root_dir)
+
+    def save_selected_directory(self, directory):
+        with open('selected_root_directory.txt', 'w') as f:
+            f.write(directory)
+
+    def load_saved_directory(self):
+        if os.path.exists('selected_root_directory.txt'):
+            with open('selected_root_directory.txt', 'r') as f:
+                selected_dir = f.read().strip()
+            self.load_directories(selected_dir)
+
+    def load_directories(self, root_dir):
+        self.treeWidget.clear()
+        root_item = QTreeWidgetItem(self.treeWidget, [root_dir])
+        root_item.setData(0, Qt.UserRole, root_dir)  # Store directory path in item data
+        self.populate_tree(root_item, root_dir)
+
+    def populate_tree(self, parent, path):
+        for item_name in os.listdir(path):
+            item_path = os.path.join(path, item_name)
+            if os.path.isdir(item_path):
+                child_item = QTreeWidgetItem(parent, [item_name])
+                child_item.setData(0, Qt.UserRole, item_path)  # Store directory path in item data
+                self.populate_tree(child_item, item_path)
+
+    def search_directories(self):
+        search_text = self.searchField.text().lower()
+        for item in self.treeWidget.findItems("*", Qt.MatchWildcard | Qt.MatchRecursive):
+            if search_text in item.text(0).lower():
+                item.setHidden(False)
+                parent_item = item.parent()
+                while parent_item:
+                    parent_item.setExpanded(True)
+                    parent_item = parent_item.parent()
+            else:
+                item.setHidden(True)
+
+    def open_directory(self):
+        selected_items = self.treeWidget.selectedItems()
+        if selected_items:
+            selected_item = selected_items[0]
+            directory_path = selected_item.data(0, Qt.UserRole)
+            if os.path.isdir(directory_path):
+                self.hide()
+                self.manager_window = RocksmithDLCManager(directory_path)
+                self.manager_window.show()
+
+class RocksmithDLCManager(QWidget):
+    def __init__(self, directory_path):
+        super().__init__()
+        self.directory_path = directory_path
         self.ensure_disabled_folder()
         self.initUI()
 
@@ -18,12 +107,12 @@ class RocksmithDLCManager(QWidget):
         
         layout = QVBoxLayout()
 
-        self.currentDirLabel = QLabel('No directory selected')
+        self.currentDirLabel = QLabel(f'Selected Directory: {self.directory_path}')
         layout.addWidget(self.currentDirLabel)
 
-        self.selectDirButton = QPushButton('Select DLC Directory')
-        self.selectDirButton.clicked.connect(self.select_directory)
-        layout.addWidget(self.selectDirButton)
+        self.backButton = QPushButton('Back to Directory Selection')
+        self.backButton.clicked.connect(self.back_to_directory_selection)
+        layout.addWidget(self.backButton)
 
         self.disableAllButton = QPushButton('Disable All')
         self.disableAllButton.clicked.connect(self.disable_all_files)
@@ -77,38 +166,18 @@ class RocksmithDLCManager(QWidget):
         layout.addWidget(self.tableWidget)
 
         self.setLayout(layout)
-        self.load_saved_directory()
+        self.load_directory()
 
-    def select_directory(self):
-        dir_path = QFileDialog.getExistingDirectory(self, "Select DLC Directory")
-        if dir_path:
-            with open('dlc_directory.txt', 'w') as f:
-                f.write(dir_path)
-            self.currentDirLabel.setText(f'Selected Directory: {dir_path}')
-            self.load_directory(clear_table=True)
+    def load_directory(self):
+        self.all_files = self.scan_directory(self.directory_path) + self.scan_directory(self.global_disabled_dir)
+        self.all_files = sorted(self.all_files, key=lambda x: os.path.basename(x))
+        self.populate_table(self.all_files)
+        self.update_buttons_state()
+        self.apply_filters()
 
-    def load_saved_directory(self):
-        if os.path.exists('dlc_directory.txt'):
-            with open('dlc_directory.txt', 'r') as f:
-                self.dlc_dir = f.read().strip()
-            self.currentDirLabel.setText(f'Selected Directory: {self.dlc_dir}')
-            self.load_directory(clear_table=False)
-
-    def load_directory(self, clear_table=False):
-        if clear_table:
-            self.tableWidget.setRowCount(0)
-
-        if os.path.exists('dlc_directory.txt'):
-            with open('dlc_directory.txt', 'r') as f:
-                self.dlc_dir = f.read().strip()
-
-            self.all_files = self.scan_directory(self.dlc_dir) + self.scan_directory(self.global_disabled_dir)
-            self.all_files = sorted(self.all_files, key=lambda x: os.path.basename(x))
-
-            self.populate_table(self.all_files)
-
-            self.update_buttons_state()
-            self.apply_filters()
+    def back_to_directory_selection(self):
+        self.close()  # Close the current window
+        initial_window.show()  # Show the initial window again
 
     def scan_directory(self, directory):
         all_files = []
@@ -123,7 +192,7 @@ class RocksmithDLCManager(QWidget):
         
         for file_path in files:
             file_name = os.path.basename(file_path)
-            enabled = os.path.dirname(file_path) == self.dlc_dir
+            enabled = os.path.dirname(file_path) == self.directory_path
             row_position = self.tableWidget.rowCount()
             self.tableWidget.insertRow(row_position)
             
@@ -143,9 +212,9 @@ class RocksmithDLCManager(QWidget):
         file_name = os.path.basename(file_path)
         if state == Qt.Checked:
             source_path = os.path.join(self.global_disabled_dir, file_name)
-            destination_path = os.path.join(self.dlc_dir, file_name)
+            destination_path = os.path.join(self.directory_path, file_name)
         else:
-            source_path = os.path.join(self.dlc_dir, file_name)
+            source_path = os.path.join(self.directory_path, file_name)
             destination_path = os.path.join(self.global_disabled_dir, file_name)
 
         if not os.path.exists(source_path):
@@ -159,9 +228,6 @@ class RocksmithDLCManager(QWidget):
             QMessageBox.critical(self, 'Error', f'Failed to move file from {source_path} to {destination_path}: {e}')
         
         self.update_buttons_state()
-
-    def search_file(self):
-        self.apply_filters()
 
     def apply_filters(self):
         search_text = self.searchField.text().lower()
@@ -195,7 +261,7 @@ class RocksmithDLCManager(QWidget):
             checkbox = self.tableWidget.cellWidget(row, 1)
             if checkbox and checkbox.isChecked():
                 file_name = self.tableWidget.item(row, 0).text()
-                file_path = os.path.join(self.dlc_dir, file_name)
+                file_path = os.path.join(self.directory_path, file_name)
                 destination_path = os.path.join(self.global_disabled_dir, file_name)
                 if os.path.exists(file_path):
                     try:
@@ -219,7 +285,7 @@ class RocksmithDLCManager(QWidget):
             if checkbox and not checkbox.isChecked():
                 file_name = self.tableWidget.item(row, 0).text()
                 file_path = os.path.join(self.global_disabled_dir, file_name)
-                destination_path = os.path.join(self.dlc_dir, file_name)
+                destination_path = os.path.join(self.directory_path, file_name)
                 if os.path.exists(file_path):
                     try:
                         checkbox.stateChanged.disconnect()
@@ -255,7 +321,7 @@ class RocksmithDLCManager(QWidget):
         for i in range(num):
             file_name = disabled_files[i]
             file_path = os.path.join(self.global_disabled_dir, file_name)
-            destination_path = os.path.join(self.dlc_dir, file_name)
+            destination_path = os.path.join(self.directory_path, file_name)
             if os.path.exists(file_path):
                 try:
                     row = self.find_row_by_filename(file_name)
@@ -281,8 +347,8 @@ class RocksmithDLCManager(QWidget):
     def apply_bulk_operation_to_search_results(self, enable):
         search_text = self.searchField.text().lower()
         operation = "Enabling" if enable else "Disabling"
-        source_dir = self.global_disabled_dir if enable else self.dlc_dir
-        dest_dir = self.dlc_dir if enable else self.global_disabled_dir
+        source_dir = self.global_disabled_dir if enable else self.directory_path
+        dest_dir = self.directory_path if enable else self.global_disabled_dir
 
         self.tableWidget.setUpdatesEnabled(False)  # Disable updates for batch processing
 
@@ -333,6 +399,6 @@ class RocksmithDLCManager(QWidget):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    ex = RocksmithDLCManager()
-    ex.show()
+    initial_window = InitialWindow()
+    initial_window.show()
     sys.exit(app.exec_())
