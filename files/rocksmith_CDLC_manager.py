@@ -30,11 +30,11 @@ class InitialWindow(QWidget):
 
         button_layout = QHBoxLayout()
 
-        self.chooseDirButton = QPushButton('Choose Directory')
+        self.chooseDirButton = QPushButton('Assign DLC folder')
         self.chooseDirButton.clicked.connect(self.choose_directory)
         button_layout.addWidget(self.chooseDirButton)
 
-        self.openDirButton = QPushButton('Open Directory')
+        self.openDirButton = QPushButton('Modify songs in directory')
         self.openDirButton.setDisabled(True)
         self.openDirButton.clicked.connect(self.open_directory)
         button_layout.addWidget(self.openDirButton)
