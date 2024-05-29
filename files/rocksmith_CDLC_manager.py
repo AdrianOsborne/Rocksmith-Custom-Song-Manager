@@ -14,7 +14,7 @@ class InitialWindow(QWidget):
     def initUI(self):
         self.setWindowTitle('Select Root Directory')
         self.setGeometry(100, 100, 800, 600)
-        
+
         layout = QVBoxLayout()
 
         self.searchField = QLineEdit()
@@ -37,6 +37,9 @@ class InitialWindow(QWidget):
         button_layout.addWidget(self.openDirButton)
 
         layout.addLayout(button_layout)
+
+        self.includeSubdirsCheckBox = QCheckBox('Include Files in Subdirectories')
+        layout.addWidget(self.includeSubdirsCheckBox)
 
         self.setLayout(layout)
 
@@ -61,7 +64,7 @@ class InitialWindow(QWidget):
     def load_directories(self, root_dir):
         self.treeWidget.clear()
         root_item = QTreeWidgetItem(self.treeWidget, [root_dir])
-        root_item.setData(0, Qt.UserRole, root_dir)  # Store directory path in item data
+        root_item.setData(0, Qt.UserRole, root_dir)  
         self.populate_tree(root_item, root_dir)
 
     def populate_tree(self, parent, path):
@@ -69,7 +72,7 @@ class InitialWindow(QWidget):
             item_path = os.path.join(path, item_name)
             if os.path.isdir(item_path):
                 child_item = QTreeWidgetItem(parent, [item_name])
-                child_item.setData(0, Qt.UserRole, item_path)  # Store directory path in item data
+                child_item.setData(0, Qt.UserRole, item_path)  
                 self.populate_tree(child_item, item_path)
 
     def search_directories(self):
@@ -91,20 +94,21 @@ class InitialWindow(QWidget):
             directory_path = selected_item.data(0, Qt.UserRole)
             if os.path.isdir(directory_path):
                 self.hide()
-                self.manager_window = RocksmithDLCManager(directory_path)
+                self.manager_window = RocksmithDLCManager(directory_path, self.includeSubdirsCheckBox.isChecked())
                 self.manager_window.show()
 
 class RocksmithDLCManager(QWidget):
-    def __init__(self, directory_path):
+    def __init__(self, directory_path, include_subdirs):
         super().__init__()
         self.directory_path = directory_path
+        self.include_subdirs = include_subdirs
         self.ensure_disabled_folder()
         self.initUI()
 
     def initUI(self):
         self.setWindowTitle('Rocksmith DLC Manager')
         self.setGeometry(100, 100, 800, 600)
-        
+
         layout = QVBoxLayout()
 
         self.currentDirLabel = QLabel(f'Selected Directory: {self.directory_path}')
@@ -136,7 +140,7 @@ class RocksmithDLCManager(QWidget):
         self.showDisabledCheckBox.setChecked(True)
         self.showDisabledCheckBox.stateChanged.connect(self.apply_filters)
         filter_layout.addWidget(self.showDisabledCheckBox)
-        
+
         layout.addLayout(filter_layout)
 
         search_layout = QHBoxLayout()
@@ -154,7 +158,7 @@ class RocksmithDLCManager(QWidget):
         self.disableSearchResultsButton.clicked.connect(self.disable_search_results)
         self.disableSearchResultsButton.setEnabled(False)
         search_layout.addWidget(self.disableSearchResultsButton)
-        
+
         layout.addLayout(search_layout)
 
         self.tableWidget = QTableWidget()
@@ -162,40 +166,45 @@ class RocksmithDLCManager(QWidget):
         self.tableWidget.setHorizontalHeaderLabels(['File Name', 'Enabled'])
         self.tableWidget.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.tableWidget.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.tableWidget.setSelectionMode(QTableWidget.NoSelection)  # Disable selection
+        self.tableWidget.setSelectionMode(QTableWidget.NoSelection)  
         layout.addWidget(self.tableWidget)
 
         self.setLayout(layout)
         self.load_directory()
 
     def load_directory(self):
-        self.all_files = self.scan_directory(self.directory_path) + self.scan_directory(self.global_disabled_dir)
+        if self.include_subdirs:
+            self.all_files = self.scan_directory(self.directory_path) + self.scan_directory(self.global_disabled_dir)
+        else:
+            self.all_files = self.scan_directory(self.directory_path, include_subdirs=False) + self.scan_directory(self.global_disabled_dir, include_subdirs=False)
         self.all_files = sorted(self.all_files, key=lambda x: os.path.basename(x))
         self.populate_table(self.all_files)
         self.update_buttons_state()
         self.apply_filters()
 
     def back_to_directory_selection(self):
-        self.close()  # Close the current window
-        initial_window.show()  # Show the initial window again
+        self.close()  
+        initial_window.show()  
 
-    def scan_directory(self, directory):
+    def scan_directory(self, directory, include_subdirs=True):
         all_files = []
         for root, dirs, files in os.walk(directory):
+            if not include_subdirs and root != directory:
+                continue
             for file in files:
                 all_files.append(os.path.join(root, file))
         return all_files
 
     def populate_table(self, files):
         self.tableWidget.setRowCount(0)
-        self.tableWidget.setUpdatesEnabled(False)  # Disable updates for batch processing
-        
+        self.tableWidget.setUpdatesEnabled(False)  
+
         for file_path in files:
             file_name = os.path.basename(file_path)
             enabled = os.path.dirname(file_path) == self.directory_path
             row_position = self.tableWidget.rowCount()
             self.tableWidget.insertRow(row_position)
-            
+
             self.tableWidget.setItem(row_position, 0, QTableWidgetItem(file_name))
 
             enabled_checkbox = QCheckBox()
@@ -203,10 +212,10 @@ class RocksmithDLCManager(QWidget):
             enabled_checkbox.stateChanged.connect(lambda state, path=file_path: self.toggle_file(path, state))
 
             self.tableWidget.setCellWidget(row_position, 1, enabled_checkbox)
-            self.tableWidget.setRowHeight(row_position, 50)  # Adjust row height if necessary
-        
-        self.tableWidget.setUpdatesEnabled(True)  # Re-enable updates
-        QMetaObject.invokeMethod(self.tableWidget, "repaint")  # Force repaint
+            self.tableWidget.setRowHeight(row_position, 50)  
+
+        self.tableWidget.setUpdatesEnabled(True)  
+        QMetaObject.invokeMethod(self.tableWidget, "repaint")  
 
     def toggle_file(self, file_path, state):
         file_name = os.path.basename(file_path)
@@ -222,11 +231,11 @@ class RocksmithDLCManager(QWidget):
             return
 
         try:
-            print(f"Moving file from {source_path} to {destination_path}")  # Debug statement
+            print(f"Moving file from {source_path} to {destination_path}")  
             shutil.move(source_path, destination_path)
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to move file from {source_path} to {destination_path}: {e}')
-        
+
         self.update_buttons_state()
 
     def apply_filters(self):
@@ -255,7 +264,7 @@ class RocksmithDLCManager(QWidget):
             os.makedirs(self.global_disabled_dir)
 
     def disable_all_files(self):
-        self.tableWidget.setUpdatesEnabled(False)  # Disable updates for batch processing
+        self.tableWidget.setUpdatesEnabled(False)  
 
         for row in range(self.tableWidget.rowCount()):
             checkbox = self.tableWidget.cellWidget(row, 1)
@@ -266,19 +275,19 @@ class RocksmithDLCManager(QWidget):
                 if os.path.exists(file_path):
                     try:
                         checkbox.stateChanged.disconnect()
-                        print(f"Disabling file: Moving from {file_path} to {destination_path}")  # Debug statement
+                        print(f"Disabling file: Moving from {file_path} to {destination_path}")  
                         shutil.move(file_path, destination_path)
                         checkbox.setChecked(False)
                         checkbox.stateChanged.connect(lambda state, path=file_path: self.toggle_file(path, state))
                     except Exception as e:
                         QMessageBox.critical(self, 'Error', f'Failed to move file from {file_path} to {destination_path}: {e}')
 
-        self.tableWidget.setUpdatesEnabled(True)  # Re-enable updates
-        QMetaObject.invokeMethod(self.tableWidget, "repaint")  # Force repaint
+        self.tableWidget.setUpdatesEnabled(True)  
+        QMetaObject.invokeMethod(self.tableWidget, "repaint")  
         self.update_buttons_state()
 
     def enable_all_files(self):
-        self.tableWidget.setUpdatesEnabled(False)  # Disable updates for batch processing
+        self.tableWidget.setUpdatesEnabled(False)  
 
         for row in range(self.tableWidget.rowCount()):
             checkbox = self.tableWidget.cellWidget(row, 1)
@@ -289,15 +298,15 @@ class RocksmithDLCManager(QWidget):
                 if os.path.exists(file_path):
                     try:
                         checkbox.stateChanged.disconnect()
-                        print(f"Enabling file: Moving from {file_path} to {destination_path}")  # Debug statement
+                        print(f"Enabling file: Moving from {file_path} to {destination_path}")  
                         shutil.move(file_path, destination_path)
                         checkbox.setChecked(True)
                         checkbox.stateChanged.connect(lambda state, path=file_path: self.toggle_file(path, state))
                     except Exception as e:
                         QMessageBox.critical(self, 'Error', f'Failed to move file from {file_path} to {destination_path}: {e}')
 
-        self.tableWidget.setUpdatesEnabled(True)  # Re-enable updates
-        QMetaObject.invokeMethod(self.tableWidget, "repaint")  # Force repaint
+        self.tableWidget.setUpdatesEnabled(True)  
+        QMetaObject.invokeMethod(self.tableWidget, "repaint")  
         self.update_buttons_state()
 
     def enable_random_songs(self):
@@ -316,7 +325,7 @@ class RocksmithDLCManager(QWidget):
 
         self.disable_all_files()
 
-        self.tableWidget.setUpdatesEnabled(False)  # Disable updates for batch processing
+        self.tableWidget.setUpdatesEnabled(False)  
 
         for i in range(num):
             file_name = disabled_files[i]
@@ -327,15 +336,15 @@ class RocksmithDLCManager(QWidget):
                     row = self.find_row_by_filename(file_name)
                     checkbox = self.tableWidget.cellWidget(row, 1)
                     checkbox.stateChanged.disconnect()
-                    print(f"Enabling file: Moving from {file_path} to {destination_path}")  # Debug statement
+                    print(f"Enabling file: Moving from {file_path} to {destination_path}")  
                     shutil.move(file_path, destination_path)
                     checkbox.setChecked(True)
                     checkbox.stateChanged.connect(lambda state, path=file_path: self.toggle_file(path, state))
                 except Exception as e:
                     QMessageBox.critical(self, 'Error', f'Failed to move file from {file_path} to {destination_path}: {e}')
-        
-        self.tableWidget.setUpdatesEnabled(True)  # Re-enable updates
-        QMetaObject.invokeMethod(self.tableWidget, "repaint")  # Force repaint
+
+        self.tableWidget.setUpdatesEnabled(True)  
+        QMetaObject.invokeMethod(self.tableWidget, "repaint")  
         self.update_buttons_state()
 
     def enable_search_results(self):
@@ -350,7 +359,7 @@ class RocksmithDLCManager(QWidget):
         source_dir = self.global_disabled_dir if enable else self.directory_path
         dest_dir = self.directory_path if enable else self.global_disabled_dir
 
-        self.tableWidget.setUpdatesEnabled(False)  # Disable updates for batch processing
+        self.tableWidget.setUpdatesEnabled(False)  
 
         for row in range(self.tableWidget.rowCount()):
             item = self.tableWidget.item(row, 0)
@@ -359,7 +368,7 @@ class RocksmithDLCManager(QWidget):
                 matches_search = search_text in item.text().lower()
                 is_checked = checkbox.isChecked()
                 should_update = matches_search and ((enable and not is_checked) or (not enable and is_checked))
-                
+
                 if should_update:
                     file_name = item.text()
                     source_path = os.path.join(source_dir, file_name)
@@ -367,7 +376,7 @@ class RocksmithDLCManager(QWidget):
                     if os.path.exists(source_path):
                         try:
                             checkbox.stateChanged.disconnect()
-                            print(f"{operation} file: Moving from {source_path} to {destination_path}")  # Debug statement
+                            print(f"{operation} file: Moving from {source_path} to {destination_path}")  
                             if os.path.exists(destination_path):
                                 os.remove(destination_path)
                             shutil.move(source_path, destination_path)
@@ -376,8 +385,8 @@ class RocksmithDLCManager(QWidget):
                         except Exception as e:
                             QMessageBox.critical(self, 'Error', f'Failed to move file from {source_path} to {destination_path}: {e}')
 
-        self.tableWidget.setUpdatesEnabled(True)  # Re-enable updates
-        QMetaObject.invokeMethod(self.tableWidget, "repaint")  # Force repaint
+        self.tableWidget.setUpdatesEnabled(True)  
+        QMetaObject.invokeMethod(self.tableWidget, "repaint")  
         self.update_buttons_state()
 
     def find_row_by_filename(self, filename):
