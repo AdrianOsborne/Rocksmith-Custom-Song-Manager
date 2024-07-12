@@ -54,6 +54,11 @@ class InitialWindow(QWidget):
         self.disableAllButton.clicked.connect(self.disable_all_files)
         layout.addWidget(self.disableAllButton)
 
+        self.resetButton = QPushButton('Reset All Saved Data')
+        self.resetButton.clicked.connect(self.reset_all_data)
+        self.resetButton.setDisabled(True)
+        layout.addWidget(self.resetButton)
+
         self.setLayout(layout)
 
         self.load_saved_directory()
@@ -78,6 +83,7 @@ class InitialWindow(QWidget):
         self.move_disabled_files_to_original_location()
         self.save_selected_directory(new_root_dir)
         self.load_directories(new_root_dir)
+        self.map_files_in_directory(new_root_dir)
         self.enable_elements()
 
     def move_disabled_files_to_original_location(self):
@@ -86,7 +92,7 @@ class InitialWindow(QWidget):
             for root, _, files in os.walk(disabled_dir):
                 for file in files:
                     source_path = os.path.join(root, file)
-                    destination_path = os.path.join(self.file_mapping.get(file, ""), file)
+                    destination_path = self.file_mapping.get(file, {}).get('path', "")
                     if not os.path.exists(destination_path):
                         new_path, ok = QFileDialog.getSaveFileName(self, "Assign new path for file", file)
                         if ok and new_path:
@@ -96,8 +102,10 @@ class InitialWindow(QWidget):
                     try:
                         os.makedirs(os.path.dirname(destination_path), exist_ok=True)
                         shutil.move(source_path, destination_path)
+                        self.file_mapping[file]['status'] = 'enabled'
                     except Exception as e:
                         QMessageBox.critical(self, 'Error', f'Failed to move file from {source_path} to {destination_path}: {e}')
+        self.save_file_mapping()
 
     def save_selected_directory(self, directory):
         with open('selected_root_directory.txt', 'w') as f:
@@ -109,6 +117,8 @@ class InitialWindow(QWidget):
                 selected_dir = f.read().strip()
             self.load_directories(selected_dir)
             self.enable_elements()
+        else:
+            self.disable_elements()
 
     def load_directories(self, root_dir):
         self.treeWidget.clear()
@@ -156,6 +166,15 @@ class InitialWindow(QWidget):
         self.openDirButton.setDisabled(False)
         self.enableAllButton.setDisabled(False)
         self.disableAllButton.setDisabled(False)
+        self.resetButton.setDisabled(False)
+        self.update_buttons_state()
+
+    def disable_elements(self):
+        self.searchField.setDisabled(True)
+        self.treeWidget.setDisabled(True)
+        self.openDirButton.setDisabled(True)
+        self.enableAllButton.setDisabled(True)
+        self.disableAllButton.setDisabled(True)
 
     def enable_all_files(self):
         self.apply_bulk_operation_to_all_files(enable=True)
@@ -164,23 +183,34 @@ class InitialWindow(QWidget):
         self.apply_bulk_operation_to_all_files(enable=False)
 
     def apply_bulk_operation_to_all_files(self, enable):
-        source_dir = os.path.join(os.path.dirname(__file__), 'disabled') if enable else self.get_saved_directory()
         dest_dir = self.get_saved_directory() if enable else os.path.join(os.path.dirname(__file__), 'disabled')
 
-        for root, _, files in os.walk(source_dir):
-            for file in files:
-                source_path = os.path.join(root, file)
+        for file, info in self.file_mapping.items():
+            if info['status'] != ('enabled' if enable else 'disabled'):
+                source_path = info['path']
                 destination_path = os.path.join(dest_dir, file)
                 try:
                     os.makedirs(os.path.dirname(destination_path), exist_ok=True)
                     shutil.move(source_path, destination_path)
-                    self.update_file_mapping(file, destination_path)
+                    self.file_mapping[file]['path'] = destination_path
+                    self.file_mapping[file]['status'] = 'enabled' if enable else 'disabled'
                 except Exception as e:
                     QMessageBox.critical(self, 'Error', f'Failed to move file from {source_path} to {destination_path}: {e}')
+        
+        self.save_file_mapping()
+        self.update_buttons_state()
 
-    def update_file_mapping(self, file_name, new_path):
-        original_dir = os.path.dirname(new_path)
-        self.file_mapping[file_name] = original_dir
+    def update_file_mapping(self, file_name, new_path, enabled):
+        if enabled:
+            self.file_mapping[file_name] = {'path': new_path, 'status': 'enabled'}
+        else:
+            self.file_mapping[file_name] = {'path': new_path, 'status': 'disabled'}
+        self.save_file_mapping()
+
+    def map_files_in_directory(self, directory):
+        for root, _, files in os.walk(directory):
+            for file in files:
+                self.file_mapping[file] = {'path': os.path.join(root, file), 'status': 'enabled'}
         self.save_file_mapping()
 
     def load_file_mapping(self):
@@ -197,6 +227,36 @@ class InitialWindow(QWidget):
             with open('selected_root_directory.txt', 'r') as f:
                 return f.read().strip()
         return ''
+
+    def reset_all_data(self):
+        reply = QMessageBox.question(self, 'Confirm Reset',
+                                     'Are you sure you want to reset all saved data? This will move all disabled files back to their original locations and delete all saved data.',
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.move_disabled_files_to_original_location()
+            if os.path.exists('selected_root_directory.txt'):
+                os.remove('selected_root_directory.txt')
+            if os.path.exists('file_mapping.json'):
+                os.remove('file_mapping.json')
+            disabled_dir = os.path.join(os.path.dirname(__file__), 'disabled')
+            if os.path.exists(disabled_dir):
+                shutil.rmtree(disabled_dir)
+            QMessageBox.information(self, 'Reset Complete', 'All saved data has been reset.')
+            self.disable_elements()
+
+    def update_buttons_state(self):
+        saved_dir = self.get_saved_directory()
+        if not saved_dir:
+            self.disable_elements()
+            self.chooseDirButton.setDisabled(False)
+            return
+
+        all_in_dlc = all(info['status'] == 'enabled' for info in self.file_mapping.values())
+        all_in_disabled = all(info['status'] == 'disabled' for info in self.file_mapping.values())
+
+        self.disableAllButton.setDisabled(all_in_disabled)
+        self.enableAllButton.setDisabled(all_in_dlc)
+        self.resetButton.setDisabled(False)
 
 class RocksmithDLCManager(QWidget):
     def __init__(self, directory_path, include_subdirectories, file_mapping):
@@ -275,38 +335,24 @@ class RocksmithDLCManager(QWidget):
         self.load_directory()
 
     def load_directory(self):
-        self.all_files = self.scan_directory(self.directory_path, self.include_subdirectories)
-        self.all_files += self.scan_directory(self.global_disabled_dir, self.include_subdirectories, self.directory_path)
-        self.all_files = sorted(self.all_files, key=lambda x: os.path.basename(x))
-        self.populate_table(self.all_files)
+        self.populate_table(self.get_files_in_directory())
         self.update_buttons_state()
         self.apply_filters()
 
-    def back_to_directory_selection(self):
-        self.close()
-        initial_window.show()
-
-    def scan_directory(self, directory, include_subdirectories, match_dir=None):
-        all_files = []
-        if include_subdirectories:
-            for root, _, files in os.walk(directory):
-                for file in files:
-                    if file.endswith('.psarc') and (match_dir is None or self.file_mapping.get(file, "").startswith(match_dir)):
-                        all_files.append(os.path.join(root, file))
-        else:
-            for file in os.listdir(directory):
-                file_path = os.path.join(directory, file)
-                if os.path.isfile(file_path) and file.endswith('.psarc') and (match_dir is None or self.file_mapping.get(file, "").startswith(match_dir)):
-                    all_files.append(file_path)
-        return all_files
+    def get_files_in_directory(self):
+        return [
+            {'name': file, 'path': info['path'], 'status': info['status']}
+            for file, info in self.file_mapping.items()
+            if info['path'].startswith(self.directory_path) or info['path'].startswith(os.path.join(os.path.dirname(__file__), 'disabled'))
+        ]
 
     def populate_table(self, files):
         self.tableWidget.setRowCount(0)
         self.tableWidget.setUpdatesEnabled(False)
 
-        for file_path in files:
-            file_name = os.path.basename(file_path)
-            enabled = os.path.dirname(file_path) == self.directory_path or (file_name in self.file_mapping and self.file_mapping[file_name] == self.directory_path)
+        for file_info in files:
+            file_name = file_info['name']
+            enabled = file_info['status'] == 'enabled'
             row_position = self.tableWidget.rowCount()
             self.tableWidget.insertRow(row_position)
 
@@ -314,7 +360,7 @@ class RocksmithDLCManager(QWidget):
 
             enabled_checkbox = QCheckBox()
             enabled_checkbox.setChecked(enabled)
-            enabled_checkbox.stateChanged.connect(lambda state, path=file_path: self.toggle_file(path, state))
+            enabled_checkbox.stateChanged.connect(lambda state, path=file_info['path']: self.toggle_file(path, state))
 
             self.tableWidget.setCellWidget(row_position, 1, enabled_checkbox)
             self.tableWidget.setRowHeight(row_position, 50)
@@ -324,27 +370,21 @@ class RocksmithDLCManager(QWidget):
 
     def toggle_file(self, file_path, state):
         file_name = os.path.basename(file_path)
-        if state == Qt.Checked:
-            source_path = os.path.join(self.global_disabled_dir, file_name)
-            destination_path = self.file_mapping[file_name] if file_name in self.file_mapping else os.path.join(self.directory_path, file_name)
-        else:
-            source_path = os.path.join(self.directory_path, file_name)
-            destination_path = os.path.join(self.global_disabled_dir, file_name)
+        dest_dir = self.directory_path if state == Qt.Checked else os.path.join(os.path.dirname(__file__), 'disabled')
+        destination_path = os.path.join(dest_dir, file_name)
 
-        if not os.path.exists(source_path):
-            QMessageBox.critical(self, 'Error', f'File does not exist: {source_path}')
+        if not os.path.exists(file_path):
+            QMessageBox.critical(self, 'Error', f'File does not exist: {file_path}')
             return
 
         try:
             os.makedirs(os.path.dirname(destination_path), exist_ok=True)
-            shutil.move(source_path, destination_path)
-            if state == Qt.Checked:
-                self.file_mapping[file_name] = os.path.dirname(destination_path)
-            else:
-                self.file_mapping[file_name] = self.directory_path
+            shutil.move(file_path, destination_path)
+            self.file_mapping[file_name]['path'] = destination_path
+            self.file_mapping[file_name]['status'] = 'enabled' if state == Qt.Checked else 'disabled'
             self.save_file_mapping()
         except Exception as e:
-            QMessageBox.critical(self, 'Error', f'Failed to move file from {source_path} to {destination_path}: {e}')
+            QMessageBox.critical(self, 'Error', f'Failed to move file from {file_path} to {destination_path}: {e}')
 
         self.update_buttons_state()
 
@@ -382,25 +422,21 @@ class RocksmithDLCManager(QWidget):
     def apply_bulk_operation_to_all_files(self, enable):
         self.tableWidget.setUpdatesEnabled(False)
 
-        source_dir = self.global_disabled_dir if enable else self.directory_path
         dest_dir = self.directory_path if enable else self.global_disabled_dir
 
-        for row in range(self.tableWidget.rowCount()):
-            checkbox = self.tableWidget.cellWidget(row, 1)
-            file_name = self.tableWidget.item(row, 0).text()
-            file_path = os.path.join(source_dir, file_name)
-            destination_path = os.path.join(dest_dir, file_name)
-            if os.path.exists(file_path):
+        for file_name, info in self.file_mapping.items():
+            if info['status'] != ('enabled' if enable else 'disabled'):
+                source_path = info['path']
+                destination_path = os.path.join(dest_dir, file_name)
                 try:
-                    checkbox.stateChanged.disconnect()
                     os.makedirs(os.path.dirname(destination_path), exist_ok=True)
-                    shutil.move(file_path, destination_path)
-                    checkbox.setChecked(enable)
-                    checkbox.stateChanged.connect(lambda state, path=file_name: self.toggle_file(path, state))
-                    self.update_file_mapping(file_name, destination_path)
+                    shutil.move(source_path, destination_path)
+                    info['path'] = destination_path
+                    info['status'] = 'enabled' if enable else 'disabled'
                 except Exception as e:
-                    QMessageBox.critical(self, 'Error', f'Failed to move file from {file_path} to {destination_path}: {e}')
-
+                    QMessageBox.critical(self, 'Error', f'Failed to move file from {source_path} to {destination_path}: {e}')
+        
+        self.save_file_mapping()
         self.tableWidget.setUpdatesEnabled(True)
         QMetaObject.invokeMethod(self.tableWidget, "repaint")
         self.update_buttons_state()
@@ -411,7 +447,7 @@ class RocksmithDLCManager(QWidget):
             QMessageBox.warning(self, "Invalid Input", "Please enter a valid number greater than 0.")
             return
 
-        disabled_files = [self.tableWidget.item(row, 0).text() for row in range(self.tableWidget.rowCount()) if not self.tableWidget.cellWidget(row, 1).isChecked()]
+        disabled_files = [file for file, info in self.file_mapping.items() if info['status'] == 'disabled']
         if not disabled_files:
             QMessageBox.warning(self, "No Disabled Files", "There are no disabled files to enable.")
             return
@@ -425,8 +461,9 @@ class RocksmithDLCManager(QWidget):
 
         for i in range(num):
             file_name = disabled_files[i]
-            file_path = os.path.join(self.global_disabled_dir, file_name)
-            destination_path = self.file_mapping[file_name] if file_name in self.file_mapping else os.path.join(self.directory_path, file_name)
+            file_info = self.file_mapping[file_name]
+            file_path = file_info['path']
+            destination_path = os.path.join(self.directory_path, file_name)
             if os.path.exists(file_path):
                 try:
                     row = self.find_row_by_filename(file_name)
@@ -434,6 +471,8 @@ class RocksmithDLCManager(QWidget):
                     checkbox.stateChanged.disconnect()
                     os.makedirs(os.path.dirname(destination_path), exist_ok=True)
                     shutil.move(file_path, destination_path)
+                    file_info['path'] = destination_path
+                    file_info['status'] = 'enabled'
                     checkbox.setChecked(True)
                     checkbox.stateChanged.connect(lambda state, path=file_name: self.toggle_file(path, state))
                 except Exception as e:
@@ -452,36 +491,26 @@ class RocksmithDLCManager(QWidget):
     def apply_bulk_operation_to_search_results(self, enable):
         search_text = self.searchField.text().lower()
         operation = "Enabling" if enable else "Disabling"
-        source_dir = self.global_disabled_dir if enable else self.directory_path
         dest_dir = self.directory_path if enable else self.global_disabled_dir
 
         self.tableWidget.setUpdatesEnabled(False)
 
-        for row in range(self.tableWidget.rowCount()):
-            item = self.tableWidget.item(row, 0)
-            checkbox = self.tableWidget.cellWidget(row, 1)
-            if item and checkbox:
-                matches_search = search_text in item.text().lower()
-                is_checked = checkbox.isChecked()
-                should_update = matches_search and ((enable and not is_checked) or (not enable and is_checked))
-
-                if should_update:
-                    file_name = item.text()
-                    source_path = os.path.join(source_dir, file_name)
-                    destination_path = self.file_mapping[file_name] if file_name in self.file_mapping else os.path.join(dest_dir, file_name)
+        for file_name, info in self.file_mapping.items():
+            if info['status'] != ('enabled' if enable else 'disabled'):
+                matches_search = search_text in file_name.lower()
+                if matches_search:
+                    source_path = info['path']
+                    destination_path = os.path.join(dest_dir, file_name)
                     if os.path.exists(source_path):
                         try:
-                            checkbox.stateChanged.disconnect()
+                            info['status'] = 'enabled' if enable else 'disabled'
                             os.makedirs(os.path.dirname(destination_path), exist_ok=True)
-                            if os.path.exists(destination_path):
-                                os.remove(destination_path)
                             shutil.move(source_path, destination_path)
-                            checkbox.setChecked(enable)
-                            checkbox.stateChanged.connect(lambda state, path=file_name: self.toggle_file(path, state))
-                            self.update_file_mapping(file_name, destination_path)
+                            info['path'] = destination_path
                         except Exception as e:
                             QMessageBox.critical(self, 'Error', f'Failed to move file from {source_path} to {destination_path}: {e}')
 
+        self.save_file_mapping()
         self.tableWidget.setUpdatesEnabled(True)
         QMetaObject.invokeMethod(self.tableWidget, "repaint")
         self.update_buttons_state()
@@ -493,8 +522,8 @@ class RocksmithDLCManager(QWidget):
         return -1
 
     def update_buttons_state(self):
-        all_in_dlc = all(self.tableWidget.cellWidget(row, 1).isChecked() for row in range(self.tableWidget.rowCount()))
-        all_in_disabled = all(not self.tableWidget.cellWidget(row, 1).isChecked() for row in range(self.tableWidget.rowCount()))
+        all_in_dlc = all(info['status'] == 'enabled' for info in self.file_mapping.values())
+        all_in_disabled = all(info['status'] == 'disabled' for info in self.file_mapping.values())
 
         self.disableAllButton.setEnabled(not all_in_disabled)
         self.enableAllButton.setEnabled(not all_in_dlc)
@@ -503,14 +532,20 @@ class RocksmithDLCManager(QWidget):
         self.enableSearchResultsButton.setEnabled(has_search_text)
         self.disableSearchResultsButton.setEnabled(has_search_text)
 
-    def update_file_mapping(self, file_name, new_path):
-        original_dir = os.path.dirname(new_path)
-        self.file_mapping[file_name] = original_dir
+    def update_file_mapping(self, file_name, new_path, enabled):
+        if enabled:
+            self.file_mapping[file_name] = {'path': new_path, 'status': 'enabled'}
+        else:
+            self.file_mapping[file_name] = {'path': new_path, 'status': 'disabled'}
         self.save_file_mapping()
 
     def save_file_mapping(self):
         with open('file_mapping.json', 'w') as f:
             json.dump(self.file_mapping, f)
+
+    def back_to_directory_selection(self):
+        self.close()
+        initial_window.show()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
