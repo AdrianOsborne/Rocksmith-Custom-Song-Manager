@@ -1,6 +1,4 @@
 # Rocksmith Custom Song Manager
-
-## Description
 Rocksmith Custom Song Manager is a tool for managing custom downloadable content for the Rocksmith game. The tool allows you to easily enable, disable, and search for custom songs within your Rocksmith DLC directory.
 
 ## Installation
