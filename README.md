@@ -3,9 +3,6 @@
 ## Description
 Rocksmith Custom Song Manager is a tool for managing custom downloadable content for the Rocksmith game. The tool allows you to easily enable, disable, and search for custom songs within your Rocksmith DLC directory.
 
-## Author
-Created by Adrian Osborne.
-
 ## Installation
 
 ### Prerequisites
@@ -43,5 +40,3 @@ Simply just double-click the `run.bat` file to start the program.
 ### Notes
 - The `disabled` folder will be created automatically in the same directory as the script if it doesn't already exist.
 - The program will move files between the DLC directory and the `disabled` folder based on your actions.
-
-Enjoy managing your Rocksmith custom songs!
